@@ -1,0 +1,11 @@
+AI Model Conversion process including import, quantize, inference and export.
+Using your h5 files can not export binary file, you can see more details on following files.
+cnn-rgb_import.txt
+cnn-rgb_quantize.txt
+cnn-rgb_export.txt
+
+
+You can also see more details in the following FAQ:
+https://forum.amebaiot.com/t/amb82-mini/1812#application-neural-network-6
+
+Note: Pro2 RGB w/h value from maximum to mimimum is 1280x704 to 96x96. The value is recommand to be the multiples of 32.

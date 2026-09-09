@@ -91,7 +91,7 @@
 | acuity 容器 image | `ghcr.io/ameba-aiot/acuity-toolkit:6.18.8` | `docker pull`，需要 GitHub PAT（`read:packages`） |
 | acuity 範例包 | `acuity_examples_c901149.tgz`（318 MB） | **不在 repo 裡**，要用自己的 Realtek 邀請重新下載 |
 | Arduino AmebaPro2 board package | 4.1.0 | Arduino IDE 2.x 板子管理員 |
-| Verisilicon NBInfo | 1.2.17 | repo 裡有 `Verisilicon_SW_NBInfo_1.2.17_20230412.tgz`（33 KB） |
+| Verisilicon NBInfo | 1.2.17 | **不在 repo 裡**（與 acuity 包同屬原廠授權物）。`Verisilicon_SW_NBInfo_1.2.17_20230412.tgz`，33 KB，隨離線工具包一起取得 |
 
 > **為什麼範例包不放 repo**：那是憑 Realtek 邀請才拿得到的，授權範圍不明，不散佈。
 > 這也是為什麼這個 repo 必須是 **private**（`realtek-email-B-bugreport.md` 也有原廠工具的缺陷細節）。

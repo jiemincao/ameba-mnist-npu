@@ -11,7 +11,7 @@ build/
 *.bin
 
 # 中間產物
-conversion-logs-*/
+# conversion-logs-*/ 是自己的輸出,留在 repo(bug report 證據)
 *.bak
 inf/
 wksp/

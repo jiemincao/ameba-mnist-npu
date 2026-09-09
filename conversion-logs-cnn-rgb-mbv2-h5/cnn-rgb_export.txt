@@ -1,0 +1,5 @@
+~/acuity/workspace/cnn/cnn_rgb ~/acuity/workspace/cnn
+ =======================================================================
+ =========== Start Generate cnn_rgb ovx C code with type of uint8 ===========
+ =======================================================================
+[31m Can not find  cnn_rgb_uint8.quantize [0m

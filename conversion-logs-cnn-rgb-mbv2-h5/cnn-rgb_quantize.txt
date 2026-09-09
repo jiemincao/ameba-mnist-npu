@@ -1,0 +1,23 @@
+~/acuity/workspace/cnn/cnn_rgb ~/acuity/workspace/cnn
+ =======================================================================
+ ==== Start Quantizing cnn_rgb model with type of  ===
+ =======================================================================
+python3 /root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/pegasus.py quantize --model cnn_rgb.json --model-data cnn_rgb.data --device CPU --batch-size 1 --iterations 10 --with-input-meta cnn_rgb_inputmeta.yml --compute-entropy --rebuild --model-quantize cnn_rgb_uint8.quantize --quantizer asymmetric_affine --qtype uint8
+2026-09-09 11:16:06.228701: W tensorflow/stream_executor/platform/default/dso_loader.cc:59] Could not load dynamic library 'libcudart.so.10.1'; dlerror: libcudart.so.10.1: cannot open shared object file: No such file or directory
+2026-09-09 11:16:06.228765: I tensorflow/stream_executor/cuda/cudart_stub.cc:29] Ignore above cudart dlerror if you do not have a GPU set up on your machine.
+[32mI Namespace(algorithm='normal', batch_size=1, compute_entropy=True, device='CPU', divergence_first_quantize_bits=11, divergence_nbins=0, hybrid=False, iterations=10, model='cnn_rgb.json', model_data='cnn_rgb.data', model_quantize='cnn_rgb_uint8.quantize', moving_average_weight=0.01, output_dir=None, qtype='uint8', quantizer='asymmetric_affine', rebuild=True, rebuild_all=False, which='quantize', with_input_meta='cnn_rgb_inputmeta.yml')[0m
+[32mI Load model in cnn_rgb.json[0m
+Traceback (most recent call last):
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/pegasus.py", line 131, in <module>
+    main(args)
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/pegasus.py", line 108, in main
+    ret = medusa.execute(args)
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/acuitylib/app/medusa/commands.py", line 201, in execute
+    nn.load_model(net, wksp_args['model_file'])
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/acuitylib/vsi_nn.py", line 254, in load_model
+    net.load(model)
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/acuitylib/acuitynet.py", line 472, in load
+    with open(filename, 'r') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'cnn_rgb.json'
+[31m ERROR ! [0m
+~/acuity/workspace/cnn

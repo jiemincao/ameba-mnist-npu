@@ -1,0 +1,45 @@
+~/acuity/workspace/cnn/cnn_rgb ~/acuity/workspace/cnn
+=========== Converting cnn_rgb ONNX model ===========
+python3 /root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/pegasus.py import onnx --model cnn_rgb.onnx --output-model cnn_rgb.json --output-data cnn_rgb.data
+2026-09-09 11:16:03.326091: W tensorflow/stream_executor/platform/default/dso_loader.cc:59] Could not load dynamic library 'libcudart.so.10.1'; dlerror: libcudart.so.10.1: cannot open shared object file: No such file or directory
+2026-09-09 11:16:03.326155: I tensorflow/stream_executor/cuda/cudart_stub.cc:29] Ignore above cudart dlerror if you do not have a GPU set up on your machine.
+[32mI Namespace(import='onnx', input_dtype_list=None, input_size_list=None, inputs=None, model='cnn_rgb.onnx', output_data='cnn_rgb.data', output_model='cnn_rgb.json', outputs=None, size_with_batch=None, which='import')[0m
+[32mI Start importing onnx...[0m
+[33mW Call onnx.optimizer.optimize fail, skip optimize[0m
+[32mI Current ONNX Model use ir_version 7 opset_version 18[0m
+[32mI Call acuity onnx optimize 'eliminate_option_const' success[0m
+[33mW Call acuity onnx optimize 'froze_const_branch' fail, skip this optimize[0m
+[32mI Call acuity onnx optimize 'froze_if' success[0m
+[32mI Call acuity onnx optimize 'merge_sequence_construct_concat_from_sequence' success[0m
+[32mI Call acuity onnx optimize 'merge_lrn_lowlevel_implement' success[0m
+Traceback (most recent call last):
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/pegasus.py", line 131, in <module>
+    main(args)
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/pegasus.py", line 112, in main
+    ret = importer.execute(args)
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/acuitylib/app/importer/commands.py", line 237, in execute
+    input_dtype_list=args.input_dtype_list)
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/acuitylib/vsi_nn.py", line 154, in load_onnx
+    net = importonnx.run()
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/acuitylib/app/importer/import_onnx.py", line 122, in run
+    is_pytorch_frontend=self.is_pytorch_frontend
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/acuitylib/converter/convert_onnx.py", line 69, in __init__
+    self._shape_inference()
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/acuitylib/converter/convert_onnx.py", line 436, in _shape_inference
+    self.model = infer_shape(self.model)
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/acuitylib/onnx_ir/onnx_numpy_backend/shape_inference.py", line 65, in infer_shape
+    smart_engine().smart_onnx_scanner(scanner)
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/acuitylib/onnx_ir/onnx_numpy_backend/smart_graph_engine.py", line 70, in smart_onnx_scanner
+    smart_driver.calc_and_assign_smart_info(node_item)
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/acuitylib/onnx_ir/onnx_numpy_backend/smart_node.py", line 48, in calc_and_assign_smart_info
+    smart_info.out_tensor_shapes = self.shape_inf_func(node_item)
+  File "/root/acuity/acuity-toolkit-rel-5.21.1/acuitynet/acuitylib/onnx_ir/onnx_numpy_backend/smart_toolkit.py", line 1018, in reshape_shape
+    reshaped = np.reshape(np.ones(in_shape.shape), new_shape)
+  File "<__array_function__ internals>", line 6, in reshape
+  File "/root/virtual_env_acuity/lib/python3.6/site-packages/numpy/core/fromnumeric.py", line 301, in reshape
+    return _wrapfunc(a, 'reshape', newshape, order=order)
+  File "/root/virtual_env_acuity/lib/python3.6/site-packages/numpy/core/fromnumeric.py", line 61, in _wrapfunc
+    return bound(*args, **kwds)
+ValueError: cannot reshape array of size 1 into shape (1,1280)
+[31m import model ERROR ! [0m
+~/acuity/workspace/cnn
