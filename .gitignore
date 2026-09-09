@@ -1,0 +1,18 @@
+# Realtek 授權取得的離線工具包 —— 憑邀請下載,不散佈
+acuity_examples_c901149.tgz
+acuity_examples*/
+Verisilicon_SW_NBInfo*.tgz
+Verisilicon_SW_NBInfo*/
+
+# 編譯產物與板子原廠檔備份(裝套件時會有,不必同步)
+_bp_bench/
+_backup_amb82/
+build/
+*.bin
+
+# 中間產物
+conversion-logs-*/
+*.bak
+inf/
+wksp/
+calib/

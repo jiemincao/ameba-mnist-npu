@@ -1,0 +1,7 @@
+{
+  "board": "realtek:AmebaPro2:Ameba_AMB82-MINI",
+  "sketch": "Blink/Blink.ino",
+  "port": "COM6",
+  "output": "../.build",
+  "//": "廢設定：vscode-arduino 用的，已改走 Arduino IDE 2.x。FQBN 保留備忘。"
+}
