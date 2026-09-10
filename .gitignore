@@ -5,7 +5,7 @@ Verisilicon_SW_NBInfo*.tgz
 Verisilicon_SW_NBInfo*/
 
 # 編譯產物與板子原廠檔備份(裝套件時會有,不必同步)
-_bp_bench/
+_bp_bench*/
 _backup_amb82/
 build/
 *.bin
@@ -16,3 +16,11 @@ build/
 inf/
 wksp/
 calib/
+
+# Pico 2 CMake 建置產物
+# _build      手動 cmake 用的
+# _build_ext  VSCode 擴充用另一個 kit 編的（驗證兩套 toolchain 時開的）
+# build       擴充的 Compile Project 預設輸出，也是 tasks.json 裡寫死的路徑
+pico2/**/_build/
+pico2/**/_build_ext/
+pico2/**/build/

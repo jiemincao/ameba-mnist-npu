@@ -1,9 +1,9 @@
 # 交接文件 —— 換機器怎麼接上進度
 
-最後更新：2026-09-09
+最後更新：2026-09-10
 
 這份文件的用途：**在另一台電腦（公司 Windows / 家裡 Mac）從零把環境接起來，繼續做下去。**
-研究過程與踩過的坑寫在 [README.md](README.md)（772 行，是研究日誌，不是操作手冊）。
+研究過程與踩過的坑寫在 [README.md](README.md)（研究日誌，不是操作手冊）。
 這裡只講「怎麼跑起來」和「現在做到哪」。
 
 ---
@@ -17,7 +17,7 @@
 | 晶片 | RTL8735B | RP2350 |
 | 算力來源 | VeriSilicon **VIP NPU**（`VIP8000NANONI_PID0XAD`） | Cortex-M33 純 CPU（CMSIS-NN） |
 | 模型格式 | `.nb`（NBG, network binary graph） | int8 TFLite → C array |
-| 狀態 | 模型已轉好、sketch 已編譯過，**還沒燒** | 還沒開始 |
+| 狀態 | ✅ **結案**：`total_cycle ≈ 60,900` = 121.8 µs | ✅ **結案**：CMSIS-NN 40,253 µs |
 
 **這不是分類器專案**，是跑分專案。所以兩邊必須跑**同一個模型**，
 即使那讓 Pico 2 多做 3 倍的第一層運算（見下面「為什麼是 3 通道」）。
@@ -60,24 +60,69 @@
 - `nn_model.bin`：6,008,832 → **131,072**
 - sketch image：11,448,320 (68%) → **5,570,560 (33%)**
 
+### 兩邊的數字（詳細分析在 README「跑分結果」一節）
+
+| | 牆鐘 µs | cycles | cycles/MAC |
+|---|---|---|---|
+| Pico 2 float32 naive | 327,653 | 49,148,544 | 36.6 |
+| Pico 2 int8 naive | 114,934 | 17,240,686 | 12.8 |
+| Pico 2 int8 + CMSIS-NN | 40,253 | 6,038,527 | 4.50 |
+| AMB82 NPU | 2,995 ⚠ | 60,900 | 0.045 |
+
+⚠ AMB82 的牆鐘約 96% 是在等 FreeRTOS 1 ms tick（`vpmdENABLE_POLLING=0`，
+`libnn.a` 預編改不了），**不是 NPU 的延遲**。cycle 數才是可信的硬體數字。
+NPU 真正的計算時間是 60,900 / 500 MHz = **121.8 µs**（時鐘域已實測確認，見下）。
+
+### ★ 最終結論：「快幾倍」必須分四層講
+
+引用單一個倍數一定會被誤用，所以四個數字要一起給：
+
+| 層次 | 數字 | 意思 |
+|---|---|---|
+| 端到端（單張推論） | **13.4x** | 今天真的拿得到的。其中 96% 時間在等 RTOS 排程 |
+| 牆鐘（純計算） | **~330x** | 40,253 µs vs 121.8 µs。含 3.33x 時鐘優勢 |
+| 時鐘歸一化（純架構） | **99.2x** | ~330x ÷ 3.33x。這才是「NPU 本身強多少」 |
+| NPU 利用率 | **5.5%** | 22 MAC/cycle vs 理論 400 MAC/cycle（0.4 TOPS @ 500 MHz） |
+
+最後一列決定了前面幾個數字能不能外推：**99.2x 是在 NPU 嚴重吃不飽的情況下拿到的**。
+MNIST 對這顆 NPU 太小（conv1 的 `C_IN = 3`，MAC array 幾乎整片閒著；只有 8 層、
+1.34 M MAC，層間 setup 攤不掉；權重在 DDR）。所以換模型時倍數兩邊都會跑：
+通道寬、層數深的模型可以超過 100x；有 NPU 不支援的算子則會 fallback 回 CPU，
+可能掉到個位數甚至倒退。
+
+做系統設計時 **13.4x 比 330x 重要** —— NPU 快到某個程度之後瓶頸就換到驅動和 OS。
+
 ### 還沒做
 
-1. **燒錄到 AMB82-MINI 並收數字** ← 下一步。板子的 port 是 **COM6**（見 `.vscode/arduino.json`）。
-   燒錄會蓋掉板子上現在的 firmware。
-2. **把 NPU 那一段拆出來**：用還原的 6 MB 224×224 內建模型、在完全相同的相機設定下再跑一輪，
-   兩者差值就是模型計算的部分。
-3. **Pico 2 那一側**：同一個 `model/mnist_cnn.h5` → int8 TFLite → C array，
-   CMSIS-NN 跑，用 `time_us_32()` 量每次推論。
+1. **Pico 2 權重搬進 SRAM**：4.50 cycles/MAC 對 CMSIS-NN 偏慢，
+   懷疑瓶頸是 112 KB 權重放在 QSPI flash、XIP cache 只有 8 KB。
+   目前只用 139 KB / 520 KB SRAM，搬得進去。
+2. **AMB82 上跑同一份 CMSIS-NN**（它的 CPU 也是 Cortex-M33）。
+   這樣才有「同一顆晶片、CPU vs NPU」這個唯一誠實的 NPU 加速比。
+   先查 Realtek 的 core 編 KM4 時有沒有定義 `__ARM_FEATURE_DSP`，
+   沒開的話 CMSIS-NN 會走純 C 路徑，比較就不成立。
+3. **還原 `_backup_amb82/`** 的原廠 `.nb`（跑分做完了，這件事現在就可以做）。
+4. **SD 卡已到貨**（2026-09-10），跑分不需要它，但之後玩別的可以用：
+   `ObjectDetectionImage` 解鎖、多個 `.nb` 不必全塞 flash、換模型不用重燒整包 firmware。
+   ⚠ **WiFi 沒被解開**（公司 802.1X，`WiFi.begin()` 只吃 WPA2-PSK），
+   所以靠 RTSP 輸出的那幾個範例還是要用手機熱點。詳見 README「SD 卡到貨後解鎖了什麼」。
 
 ### 未解決 / 已知限制
 
-- **sketch 量的是「回呼到回呼」的間隔**，也就是整條管線的 throughput
-  （取影像 + resize + NPU + 後處理），**不是純 NPU 延遲**。
-  ⚠ 如果印出來的平均值剛好卡在 33.3 ms，那是被相機 30 fps 限住，不是 NPU 的極限 ——
-  要把 `NNFPS` 調更高再量。
-- 純 NPU 計時另有一條路：`vipnn_ctx_t.measure` 裡的 `tick[8]`，
-  `libnn.a` 的字串有 `vip_inference_profile_t` / `inference_time`。
-  但 tick 的語意沒有文件，**刻意不走這條**（量到不知道含意的數字沒用）。
+- **牆鐘量不到 121.8 µs，這是驅動的限制不是我們的**：`vpmdENABLE_POLLING = 0`，
+  `vip_run_network()` 阻塞在 OS wait 上，`configTICK_RATE_HZ = 1000`，
+  所以每次呼叫至少吃 ~3 個 tick（實測固定 2,995 µs）。`libnn.a` 是預編的，
+  改不了這個選項。**單張推論的端到端時間就是 ~3 ms，這是真實的部署限制**，
+  只有 batch 很多張才能把它攤掉。
+- `hw_avg_us` 印 1 是假的（那個數字的來源是 OS tick，解析度不夠），**看 `total_cycle`**。
+- 「250 MHz」那行 log 只是回顯 `#define`，**不是暫存器回讀**。時鐘域的結論靠的是
+  cycle 數的變化（−2.8%），不是那行字。要決定性證明就讀回
+  `SYSON_S_REG_SYS_NN_CTRL`（offset **0x11C**，欄位 `SYSON_S_MASK_SYS_NN_SRC_SEL` = `0x3 << 3`，
+  定義在 `.../fwlib/rtl8735b/lib/include/rtl8735b_syson_s_type.h:941-950`）。
+- 歷史註記（已不適用於現在的 sketch）：最早那版是掛在相機回呼上量「回呼到回呼」，
+  量到的是整條管線的 throughput 而不是 NPU 延遲，而且會被相機 30 fps 夾在 33.3 ms。
+  現在的 `MnistNpuBench` 是直接呼叫 VIPLite，沒有相機、沒有 VOE，所以不受這個影響。
+- VOE / 相機路徑起不來的問題**沒有解決，是設計上繞開的**。跑分不需要相機。
 
 ---
 
@@ -102,8 +147,9 @@
 
 ```
 D:\workdir\ameba\              (Windows，= 這個 git repo)
-├── MnistNpuBench/             跑分 sketch
-├── model/                     h5 / nb / inputmeta（含 .orig 對照）
+├── MnistNpuBench/             AMB82 跑分 sketch
+├── pico2/MnistPicoBench/      Pico 2 跑分專案（CMake，跟 AMB82 完全獨立）
+├── model/                     h5 / nb / tflite / inputmeta（含 .orig 對照）
 ├── scripts/                   容器內用的腳本（從 WSL 複製過來的）
 ├── _backup_amb82/             ★ 板子原廠檔備份，還原用，不在 git 裡
 ├── acuity_examples_c901149.tgz  ★ 授權工具包，不在 git 裡
@@ -117,6 +163,10 @@ D:\workdir\ameba\              (Windows，= 這個 git repo)
 ├── quant_mnist.sh
 ├── verify_mnist.sh
 └── score_mnist.py
+
+（Pico 2 那邊的相依不在上面兩處，是這兩個地方）
+~/.pico-sdk/                   VSCode Pico 擴充自己下載的 sdk / toolchain / picotool / cmake / ninja
+D:\workdir\pico-deps\CMSIS-NN  CMSIS-NN 7.0.0 原始碼（自己 clone 的）
 ```
 
 ⚠ **`scripts/` 不會自動同步。** 在容器裡改了腳本，記得複製回 `scripts/` 再 commit，
@@ -203,6 +253,47 @@ hardware/AmebaPro2/4.1.0/variants/common_nn_models/img_class_cnn.nb     ← 順�
 
 ⚠ **不要在 Arduino IDE 可能正在編譯時，同時用 arduino-cli 編譯** ——
 會撞同一個 build 目錄。用 cli 時一定加 `--build-path` 指到別的地方。
+
+### Pico 2 那邊怎麼建、怎麼燒
+
+跟 AMB82 完全獨立，不需要 Docker、不需要 acuity。需要三樣東西：
+
+| 元件 | 版本 | 位置（這台機器上） |
+|---|---|---|
+| pico-sdk | 2.1.1 | `C:/Users/M90t/.pico-sdk/sdk/2.1.1` |
+| arm-none-eabi-gcc | 15_2_Rel1 | `~/.pico-sdk/toolchain/` |
+| CMSIS-NN | 7.0.0 | `D:/workdir/pico-deps/CMSIS-NN` |
+| picotool | 2.3.1 | `~/.pico-sdk/picotool/` |
+
+（`~/.pico-sdk/` 是 VSCode Pico 擴充自己下載的，它**確實**帶 SDK payload。
+所以裝了擴充就有這些，不必另外裝 toolchain。）
+
+**指令列建置**：
+
+```bash
+cd pico2/MnistPicoBench
+cmake -S . -B build -G Ninja \
+      -DPICO_SDK_PATH=C:/Users/M90t/.pico-sdk/sdk/2.1.1 \
+      -DCMSIS_NN_PATH=D:/workdir/pico-deps/CMSIS-NN
+cmake --build build
+# 產出 build/mnist_pico_bench.uf2
+```
+
+**燒錄**：按住 BOOTSEL 插 USB → 出現 `RPI-RP2` 磁碟 → 把 `.uf2` 拖進去。
+（或 `picotool load build/mnist_pico_bench.uf2 -fx`，就是 tasks.json 的 Run Project。）
+接著開序列埠（USB CDC 或 UART0 GP0/GP1 都會印同樣內容），
+程式會等最多 3 秒讓你連上，然後自己跑完三輪印 `==== 跑完了 ====` 就停。
+
+⚠ **在 VSCode 裡不要按「Import Project」。** 那個功能在 Windows 上是壞的，
+而且它實際跑的是 `pico_project.py --convert`（官方 help 自己寫 "risks data loss"），
+會就地改寫我們的 `CMakeLists.txt`（裡面有 CMSIS-NN 接線和三個模式的旗標）。
+擴充要的東西已經手動補好了（`CMakeLists.txt` 裡那段 DO NOT EDIT header + `.vscode/`），
+**直接 `Open Folder` 開 `pico2/MnistPicoBench/` 本身**，Compile / Run 按鈕就會出現。
+根本原因與證據鏈寫在 README「Pico 2 專案怎麼建的」一節。
+
+⚠ **跑分數字必須來自同一套 toolchain。** 兩套實測差 0.5%
+（GCC 10.3.1：587,188 text / 138,988 bss；GCC 15.2.1：590,108 / 138,984），
+不大但足以污染小幅度的比較。目前的數字是 15_2_Rel1 這套。
 
 ---
 
@@ -330,7 +421,18 @@ port 名字會是 `/dev/cu.usbserial-*` 之類，不是 COM6。
 
 | 路徑 | 是什麼 |
 |---|---|
-| `MnistNpuBench/MnistNpuBench.ino` | 跑分 sketch。無 WiFi/RTSP/OSD，管線只留 camera → NPU → Serial，印 CSV |
+| `MnistNpuBench/MnistNpuBench.ino` | AMB82 跑分 sketch。直接呼叫 VIPLite，無 camera/VOE/WiFi/RTSP，印 CSV。`NN_CLK_SEL` 掃 NPU 時鐘 |
+| `MnistNpuBench/mnist_bench_data.h` | 測試圖（3 通道 planar）+ PC 端期望輸出，兩塊板子吃同一張圖 |
+| `pico2/MnistPicoBench/` | ★ Pico 2 跑分專案（CMake + pico-sdk 2.1.1 + CMSIS-NN 7.0.0） |
+| `pico2/MnistPicoBench/main.c` | 計時骨架，一支程式跑三種模式，印同格式 CSV |
+| `pico2/MnistPicoBench/net_float.c` | float32 naive 基準線（Keras 原始權重排列） |
+| `pico2/MnistPicoBench/net_int8.c` | int8 naive + CMSIS-NN 兩份實作 |
+| `pico2/MnistPicoBench/model/*.h` | 權重、量化參數、測試圖、TFLite 期望輸出（自動產生） |
+| `pico2/MnistPicoBench/kernels.h` | 三個模式的共同介面 |
+| `pico2/MnistPicoBench/CMakeLists.txt` | 手寫，含 CMSIS-NN 接線與旗標；**不要讓擴充改它** |
+| `pico2/MnistPicoBench/.vscode/` | 擴充要的六個 json（用它自己的產生器產的，不是手抄） |
+| `scripts/gen_pico_data.py` | 從 `.tflite` 抽量化參數產上面那三個標頭 |
+| `model/mnist_cnn_int8.tflite` | 全整數 int8 量化模型（112,352 B） |
 | `model/mnist_cnn.h5` | 訓練好的 Keras 2 模型（448 KB） |
 | `model/mnist_cnn.nb` | 轉好的 NBG，可直接蓋成 `img_class_cnn.nb`（123,912 B） |
 | `model/mnist_cnn_inputmeta.yml` | ★ 改好的版本 |
@@ -342,7 +444,7 @@ port 名字會是 `/dev/cu.usbserial-*` 之類，不是 COM6。
 | `scripts/score_mnist.py` | 對答案、算一致率與最大誤差 |
 | `wsl-docker-up.sh` | 在 WSL 裡手動叫起 dockerd（沒 systemd） |
 | `patch_inputmeta.py` | 純文字改 inputmeta（不依賴 yaml 套件） |
-| `README.md` | 772 行研究日誌 —— 為什麼這樣做、排除過哪些路 |
+| `README.md` | 研究日誌 —— 為什麼這樣做、排除過哪些路、每個結論的證據 |
 | `realtek-email-A-access.md` | 索取離線工具權限的信（已寄出，已拿到） |
 | `realtek-email-B-bugreport.md` | 缺陷回報草稿，**未寄出**。坑 2 的兩處 `--iterations` 寫死值得補進去 |
 | `_backup_amb82/` | ★ 板子原廠檔備份，**不在 git 裡**，還原用 |
@@ -352,10 +454,27 @@ port 名字會是 `/dev/cu.usbserial-*` 之類，不是 COM6。
 
 ## 十、下一步
 
-1. 燒 `MnistNpuBench` 到 COM6，收 CSV 數字
-2. 還原 6 MB 內建模型、相同相機設定再跑一輪 → 差值 = 模型計算部分
-3. Pico 2：`model/mnist_cnn.h5` → int8 TFLite → C array → CMSIS-NN → `time_us_32()`
-4. 兩邊數字放一起，這個專案就完成了
+**主線結案。** 兩塊板子都量完，時鐘域也判定完了，該有的數字都有了：
+13.4x（端到端）/ ~330x（牆鐘）/ 99.2x（架構）/ 5.5%（利用率）。
+訓練 → 轉檔 → 燒錄 → 懂原理這條學習路線也走完一遍了。
 
-可以順手做的：把坑 2 補進 `realtek-email-B-bugreport.md` 再寄出（`install.sh` 那個
-`$?` 永遠成功的 bug 也一起）；縮 PAT 權限；`AudioClassification` 還沒燒過。
+### 收尾（隨時可做，不影響結論）
+1. 還原 `_backup_amb82/` 的原廠 `.nb`
+2. 把坑 2 補進 `realtek-email-B-bugreport.md` 再寄出
+   （兩處 `--iterations 1` 寫死 + `install.sh` 的 `$?` 永遠成功）
+3. 縮 GitHub PAT 權限（現在有 `delete_repo, repo, write:discussion, write:packages`，太寬）
+
+### 如果要把跑分挖更深（選做，都有明確假設要驗）
+4. **Pico 2 權重搬 SRAM**：驗「4.50 cycles/MAC 是被 flash XIP 拖累」。
+   搬進去後掉到 2 附近就成立。
+5. **AMB82 跑同一份 CMSIS-NN**：拿到「同一顆晶片、CPU vs NPU」這個唯一
+   完全誠實的加速比。先確認 `__ARM_FEATURE_DSP`。
+6. **讀回 NN 時鐘暫存器**：讓時鐘域從「強烈推論」變成「直接觀測」。
+
+### 之後玩別的（SD 卡已到貨）
+- `ObjectDetectionImage`（要 SD 讀 `image_list.txt`）現在可跑
+- 模型放 SD → 不必全塞 flash（YAMNet 一顆就吃 84%），換模型也不用重燒整包
+- `AudioClassification` 一直沒燒過，可以補
+- ⚠ **WiFi 還是不通**（802.1X）→ RTSP 那幾個範例要用手機熱點
+- ⚠ 切成 SD 載入後，開機找不到 `.nb` 會**直接卡住**（不是印警告跳過），
+  檔名路徑要對

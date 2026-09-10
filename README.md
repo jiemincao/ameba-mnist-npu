@@ -3,6 +3,14 @@
 ## 目前進度
 - [x] **Blink 燒錄成功**（2026-09-08，COM51，LED 正常閃爍）
 - [x] **第一個 AI 範例：AudioClassification 編譯通過**（84% flash，待燒錄驗證）
+- [x] **AMB82 跑分完成**（2026-09-09）：直接呼叫 VIPLite，12 輪 × 100 次全 PASS，
+      `total_cycle ≈ 60,900`（±0.3%）
+- [x] **Pico 2 跑分完成**（2026-09-10）：三種模式一支程式，3 輪全 PASS，
+      int8 輸出與 TFLite 逐 byte 相同 → 見「跑分結果」一節
+- [x] **時鐘域已判定**（2026-09-10）：`NN_CLK_SEL=2`（250 MHz）重燒後 `total_cycle` 從 ~60,900 變成 ~59,206（**−2.8%,不是兩倍**）→ 數的是 NPU 核心時鐘域 → `121.8 µs` 成立。`NN_CLK_SEL` 已改回 `0`。
+- [x] **跑分專案結案**：最終數字分四層（端到端 13.4x / 牆鐘 ~330x / 時鐘歸一化 99.2x / NPU 利用率 5.5%），見「跑分結果」一節
+- [ ] SD 卡**已到貨**（2026-09-10）→ 之前為了避開 SD 卡而繞的路現在都可以走直路了，
+      見「SD 卡到貨後解鎖了什麼」一節
 
 ## Board package
 Additional Boards Manager URL（stable）:
@@ -100,6 +108,32 @@ Blink                 4788224 bytes  (28%)
 AudioClassification  14118912 bytes  (84%)   ← 含 YAMNet
 ```
 單一模型沒問題，但要同時載多個模型很可能爆 16MB，那時才需要 SD 卡。
+
+## ★ SD 卡到貨後解鎖了什麼（2026-09-10）
+
+跑分專案**完全不需要** SD 卡（模型走 flash，`.nb` 跟 firmware 一起打包），
+所以這一節跟跑分結論無關，是給「之後玩別的」用的。
+
+之前受限於沒有 SD 卡而被排除的東西，現在可以走直路：
+
+| 原本卡住的 | 卡住的原因 | 現在 |
+|---|---|---|
+| `ObjectDetectionImage` | 要讀 SD 上的 `image_list.txt` 當輸入 | ✅ 可跑 |
+| `ObjectDetectionSaveSDCard` | 要寫檔 + 要 WiFi | ⚠ SD 解了，WiFi 還是卡（802.1X） |
+| 同時載多個 `.nb` | 全塞 flash 會爆 16MB（YAMNet 一顆就 84%） | ✅ 模型放 SD |
+| 換模型要重燒整包 firmware | flash 模式下改模型 = 重編 + 重燒 | ✅ 換 SD 上的檔就好，迭代快很多 |
+
+**但 WiFi 那條線沒有被解開。** 公司網路是 802.1X 企業認證，
+Arduino 的 `WiFi.begin(ssid, pass)` 只吃 WPA2-PSK。所以
+`ObjectDetectionLoop / Callback`、`HandGestureDetection`、`RTSPFaceDetection`
+這些靠 RTSP 串流輸出的範例，還是要另外想辦法（手機熱點是最省事的解法）。
+
+換句話說：**SD 卡解的是「輸入 / 輸出檔案」和「flash 容量」，不解「網路」。**
+
+### 一個提醒
+`NN Model Load From` 這個 IDE 選項改成 SD 之後，firmware 就不再內含模型，
+但**開機時找不到 `.nb` 會直接卡住**（不是印警告然後跳過）。
+所以切換這個選項時，要確認卡上的檔名和路徑跟 library 期望的一致。
 
 ## 自訂模型 / 轉檔（研究結論，2026-09-08）
 
@@ -269,6 +303,188 @@ Pico 2 上大概是餵固定陣列 -> **不對等**。
 進階:`model_classification.c` 是原始碼,裡面有被註解掉的
 `memcpy(tensor_in_ptr, golden_data_bin, golden_data_bin_len);`
 就是用來餵固定資料排除相機變因的。基本流程跑通後再考慮。
+
+## ★★★ 跑分結果(2026-09-10,兩邊都實測完成)
+
+兩邊跑的是**同一個 `mnist_cnn.h5`**、**同一張圖**(MNIST test 集第一張標籤 7 的),
+共 1,342,848 MAC。AMB82 走 `.nb` 交給 NPU,Pico 2 走 int8 TFLite 交給 CPU。
+
+### Pico 2 (RP2350 / Cortex-M33 @150MHz)
+
+一支程式跑三種模式,燒一次拿到全部數字。三輪結果幾乎完全重合
+(FLOAT 的 min/max 只差 0.13%)。
+
+| 模式 | 牆鐘 µs | cycles | cycles/MAC | fps | 相對前一階 |
+|---|---|---|---|---|---|
+| float32 naive | 327,653 | 49,148,544 | 36.6 | 3.1 | — |
+| int8 naive | 114,934 | 17,240,686 | 12.8 | 8.7 | **2.85x** |
+| int8 + CMSIS-NN | 40,253 | 6,038,527 | 4.50 | 24.8 | **2.85x** |
+
+**為什麼要三個模式而不是只量 CMSIS-NN**:這樣每一步只變一件事。
+`float -> int8_ref` 量的是量化的貢獻,`int8_ref -> cmsisnn` 量的是 SIMD kernel 的貢獻。
+直接拿 float naive 比 CMSIS-NN 會得到 8.14 倍,但那個數字分不出功勞歸誰。
+兩者剛好各貢獻 2.85 倍。
+
+三個模式**都用 `-O2`** 編(CMSIS-NN 自己那份照官方用 `-Ofast`)。
+如果 naive 版故意不開優化,倍數裡就混進了編譯器旗標的功勞。
+
+### 計時可信度自我檢查
+
+49,148,544 cycles / 327,653 µs = **150.00 cycles/µs**,跟 `clk_sys` 報的
+150 MHz 對到小數點後兩位。所以 DWT CYCCNT 和 `time_us_32()` 兩把尺互相印證。
+
+### 正確性驗證(不是「看起來對」)
+
+兩個 int8 模式的 10 個 byte 輸出**跟 PC 上 TFLite 直譯器逐位元組相同**
+(`g_expect_q`),不同就報 FAIL 並印出第一個不符的 class。實測全 PASS。
+FLOAT 模式的機率 1000‰ 跟 PC float 模型完全相同,順便驗證了手寫 kernel
+對 Keras `[KH][KW][CIN][COUT]` 權重排列的索引沒寫錯。
+
+int8 的機率是 996‰ 而非 1000‰,那是量化本身的誤差,不是 bug。
+
+### 跟 AMB82 NPU 並排
+
+| | 牆鐘 µs | cycles | cycles/MAC |
+|---|---|---|---|
+| Pico 2 CMSIS-NN @150MHz | 40,253 | 6,038,527 | 4.50 |
+| AMB82 NPU | 2,995 ⚠ | 60,900 | 0.045 |
+
+cycle 數差 **99.2 倍**(NPU 每 cycle 做 22 個 MAC,CPU 每 4.5 cycle 才做 1 個)。
+
+⚠ **牆鐘那格不能直接用。** AMB82 的 2,995 µs 有約 96% 是在等 FreeRTOS 的 1 ms tick
+(`vpmdENABLE_POLLING=0`,而 `libnn.a` 是預編的所以改不了)。
+真正的計算時間是 60,900 cycle / 500 MHz = **121.8 µs**（時鐘域已經實測確認，見下節）。
+
+### 已定案:total_cycle 數的是 NPU 核心時鐘域
+
+實驗方法:把 sketch 的 `NN_CLK_SEL` 改成 2(250 MHz)重燒,工作量完全不變。
+實驗前先把判準寫好:cycle 數不變 -> 是 NPU 自己的時鐘域；變兩倍 -> 是固定參考時鐘。
+
+| NN_CLK_SEL | NPU 時鐘 | total_cycle | 換算時間 |
+|---|---|---|---|
+| 0 | 500 MHz | ~60,900 | 121.8 µs |
+| 2 | 250 MHz | ~59,206(27 輪範圍 59,096–59,346) | 236.8 µs |
+
+**−2.8%,不是 +100%**。走第一條:`total_cycle` 數的是 NPU 核心自己的 cycle,
+所以 121.8 µs 站得住。
+
+那 −2.8% 本身反而是「時鐘真的切了」的證據:開機 log 裡 `ddr_freq = 533`,
+DDR2 是**固定** 533 MHz,不跟著 NN 時鐘走。記憶體等待的**絕對時間**固定,
+換算成核心 cycle 時就會隨核心時鐘變慢而縮短 -> stall cycle 變少 -> 總 cycle 略降。
+若時鐘根本沒切成功,兩組應該完全重疊(誤差 <0.1%)而不是穩定差 2.8%
+(27 輪的範圍跟 500 MHz 那組完全不重疊)。
+
+誠實說的保留:log 那行 `NPU power+clk : NN_SYS enabled @ 250 MHz` 只是把
+`#define` 回顯出來,**不是暫存器回讀**,上面的推論靠的是 cycle 數的變化。
+牆鐘也幫不上忙(236.8 µs 照樣埋在 3 ms tick 底下,兩組都是 2,995 µs)。
+要決定性證明就讀回 `SYSON_S_REG_SYS_NN_CTRL`(offset **0x11C**,
+欄位 `SYSON_S_MASK_SYS_NN_SRC_SEL` = `0x3 << 3`)。不做也不影響結論。
+
+### 「快幾倍」要分四層講,否則很容易誤用
+
+| 層次 | 數字 | 意思 |
+|---|---|---|
+| 端到端（單張推論） | **13.4x** | 你今天真的拿得到的。其中 96% 時間在等 RTOS 排程 |
+| 牆鐘（純計算） | **~330x** | 40,253 µs vs 121.8 µs。含時鐘優勢 |
+| 時鐘歸一化（純架構） | **99.2x** | ~330x ÷ 3.33x。這才是「NPU 這個東西強多少」 |
+| NPU 利用率 | **5.5%** | 22 MAC/cycle vs 理論 400 MAC/cycle(0.4 TOPS @ 500 MHz) |
+
+最後一列很重要:**這 99.2x 是在 NPU 嚴重吃不飽的情況下拿到的**。MNIST 對這顆
+NPU 太小了 —— conv1 的 `C_IN = 3`,MAC array 想吃寬通道,這層幾乎整片閒著；
+只有 8 層、1.34 M MAC,層與層之間的 setup 成本攤不掉；權重在 DDR。
+所以這個倍數兩邊都會跑:
+
+- 換成通道數大、層數深、對 NPU 友善的模型（MobileNet 之類）→ 利用率上去,**可以超過 100x**
+- 換成有 NPU 不支援的算子 → 那層 fallback 回 CPU,**可能掉到個位數甚至倒退**
+  （還多付一趟資料搬進搬出）
+
+業界常引的「MCU NPU vs Cortex-M CPU 快 10–100 倍」大致就是這個區間,我們落在上緣。
+
+而做系統設計時,那個 **13.4x 比 330x 重要** —— NPU 快到某個程度之後,
+瓶頸就換到驅動和 OS 了。要把 100x 兌現成可用的 100x,得能 batch 很多張把固定
+開銷攤掉,或者拿到能開 polling 的 `libnn.a`。
+
+### 下一個值得做的實驗:把權重搬到 SRAM
+
+4.50 cycles/MAC 對 CMSIS-NN 偏慢。最可能的原因是**權重放在 QSPI flash 靠 XIP 讀**,
+而 RP2350 的 XIP cache 只有 8 KB,裝不下 112 KB 的 int8 權重 ——
+等於每次推論都在重跑 flash。目前只用了 139 KB / 520 KB SRAM,搬得進去。
+
+如果搬進 SRAM 後 cycles/MAC 掉到 2 附近,就證明瓶頸在記憶體階層而不在算術。
+這正好是規格表上看不到、卻決定實際效能的那類東西。
+
+### 規格差異怎麼處理(不能假裝不存在)
+
+| 變因 | AMB82 (RTL8735B) | Pico 2 (RP2350) | 怎麼辦 |
+|---|---|---|---|
+| CPU 時脈 | Armv8-M @500 MHz | Cortex-M33 @150 MHz | 3.33x,**用 cycle 比就自動消掉** |
+| 有沒有 NPU | 有,0.4 TOPS | 沒有 | 不能消,但可隔離(見下) |
+| RAM | 最大 128 MB | 520 KB | **對這個 benchmark 不構成差別** |
+
+RAM 那項可以直接排除:模型權重 112 KB、最大中間層 12.5 KB,
+Pico 2 用 139 KB 就跑完,兩邊都沒碰到記憶體天花板。差 200 倍不影響任何數字,
+這要講清楚,否則會被誤解成「快是因為記憶體大」。
+
+NPU 那項的隔離辦法:**AMB82 的 CPU 也是 Cortex-M33**,所以 `net_int8.c` 那份
+CMSIS-NN 程式碼原則上可以原封不動搬過去跑,就得到四個數字:
+
+```
+A  Pico 2  CPU @150MHz  CMSIS-NN int8   已完成
+B  AMB82   CPU @500MHz  CMSIS-NN int8   未做
+C  AMB82   NPU          .nb             已完成
+D  Pico 2  CPU @150MHz  float naive     已完成
+```
+
+每一組比較只有一個變因:A vs B 只差時脈(cycle 數應該接近 1:1,不是的話差在
+flash/cache 這些規格表外的東西);**B vs C 才是唯一能誠實稱作「NPU 加速比」的數字**
+(同一顆晶片、同一個模型、同一張圖);D vs A 是量化 + SIMD 的貢獻。
+
+做 B 之前要先查 Realtek 的 Arduino core 編 KM4 時有沒有定義 `__ARM_FEATURE_DSP`。
+沒開的話 CMSIS-NN 會退回純 C 路徑,那 A vs B 就不是同一份程式碼了。
+
+### Pico 2 專案怎麼建的(不用擴充的 Import Project)
+
+Pico VSCode 擴充 0.23.0 的 **Import Project 在 Windows 上是壞的**,而且不該用:
+
+1. 它實際執行 `pico_project.py --convert`,這個旗標的官方 help 寫著
+   "risks data loss" —— 會就地改寫 `CMakeLists.txt`。我們那份裡有 CMSIS-NN 的
+   接線和三個模式的旗標設定。
+2. 它切專案名稱用 `projectRoot.lastIndexOf("/")`,**只找正斜線**。
+   Windows 路徑全是反斜線 -> 回傳 −1 -> 名稱變成整條路徑、`--projectRoot` 變成空字串。
+   證據就在錯誤訊息本身:`Could not import new project: d:\workdir\ameba\pico2\MnistPicoBench`
+   —— 那個位置印的是「專案名稱」,印出整條路徑就代表沒被切開。
+   (拿它自己的 `pico_project.py` 用同一組參數手動跑,一次就成功,所以壞的是 UI 到
+   產生器之間的參數傳遞。)
+
+正確做法是**手動補上擴充要的東西,然後直接 `Open Folder` 開專案資料夾本身**:
+
+- `CMakeLists.txt` 加上 header(內容抄 `pico_project.py` 的 `cmake_header_us`),
+  必須在 `project()` 之前 —— `pico-vscode.cmake` 是靠設 `CMAKE_C_COMPILER` /
+  `PICO_SDK_PATH` 接管 toolchain 的,`project()` 一跑編譯器就定案。
+- `.vscode/` 六個 json 用它自己的產生器產(不要手抄版本號和路徑)。
+
+擴充判斷是不是 Pico 專案跟有沒有 import 過無關,是開資料夾時 regex 讀:
+
+```
+/^set\(sdkVersion\s+([^)]+)\)/m
+/^set\(toolchainVersion\s+([^)]+)\)/m
+/^set\(picotoolVersion\s+([^)]+)\)/m
+```
+
+所以之前一直失敗只是因為 workspace 開在 `d:\workdir\ameba`,那層沒有 `CMakeLists.txt`。
+
+順手修掉產生器的一個 typo:它產的 `tasks.json` 裡 Compile 在 Windows 分支寫成
+`ninja.exe.exe`(多一個 `.exe`),照那樣按會找不到執行檔。
+
+### 兩套 toolchain 都驗過
+
+| toolchain | text | bss |
+|---|---|---|
+| GCC 10.3.1(Rafael 那套,`_build/`) | 587,188 | 138,988 |
+| GCC 15.2.1(擴充自帶,`_build_ext/`、`build/`) | 590,108 | 138,984 |
+
+差 0.5%。但**跑分數字要固定用同一套編出來的**,不然倍數裡混進編譯器版本差異。
+上表的實測值來自 GCC 15.2.1。
 
 ## ★★★ 已驗證的成功案例(最重要的一節)
 
