@@ -1,6 +1,6 @@
 # 交接文件 —— 換機器怎麼接上進度
 
-> ⚠ **已併入 [COURSE.md](../COURSE.md)（Part 12 環境、附錄 A、Part 10 坑、Part 11 待辦）。**
+> ⚠ **已併入 [REFERENCE.md](../REFERENCE.md)（Part 12 環境、附錄 A、Part 10 坑、Part 11 待辦）。**
 > 這份是 2026-09 跑分結案時的交接快照，保留原文備查，**不再更新**。
 
 ---
