@@ -24,3 +24,9 @@ calib/
 pico2/**/_build/
 pico2/**/_build_ext/
 pico2/**/build/
+
+# arduino-cli --build-path 的輸出（編譯暫存,可重建）
+_bp_*/
+
+# Python
+__pycache__/

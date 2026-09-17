@@ -1,8 +1,9 @@
 #!/bin/bash
 # 跑滿 200 張校正圖的 float / uint8 推論,官方 pegasus_inference.sh 一樣寫死 --iterations 1。
 set -e
-cd /workspace/acuity_examples_c901149/Models/mnist_cnn
-NAME=mnist_cnn
+DIR=${DIR:-/workspace/acuity_examples_c901149/Models/mnist_cnn}
+NAME=${NAME:-mnist_cnn}
+cd "$DIR"
 ITER=${ITER:-200}
 
 rm -rf inf

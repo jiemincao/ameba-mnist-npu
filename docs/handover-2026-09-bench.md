@@ -1,9 +1,14 @@
 # 交接文件 —— 換機器怎麼接上進度
 
+> ⚠ **已併入 [COURSE.md](../COURSE.md)（Part 12 環境、附錄 A、Part 10 坑、Part 11 待辦）。**
+> 這份是 2026-09 跑分結案時的交接快照，保留原文備查，**不再更新**。
+
+---
+
 最後更新：2026-09-10
 
 這份文件的用途：**在另一台電腦（公司 Windows / 家裡 Mac）從零把環境接起來，繼續做下去。**
-研究過程與踩過的坑寫在 [README.md](README.md)（研究日誌，不是操作手冊）。
+研究過程與踩過的坑寫在 [docs/research-log.md](research-log.md)（研究日誌，不是操作手冊）。
 這裡只講「怎麼跑起來」和「現在做到哪」。
 
 ---
@@ -153,7 +158,7 @@ D:\workdir\ameba\              (Windows，= 這個 git repo)
 ├── scripts/                   容器內用的腳本（從 WSL 複製過來的）
 ├── _backup_amb82/             ★ 板子原廠檔備份，還原用，不在 git 裡
 ├── acuity_examples_c901149.tgz  ★ 授權工具包，不在 git 裡
-└── README.md / HANDOVER.md
+└── README.md / COURSE.md / docs/
 
 ~/ameba-toolkit/               (WSL 或 Mac 家目錄，工具包解開的地方)
 ├── acuity_examples_c901149/
@@ -444,7 +449,7 @@ port 名字會是 `/dev/cu.usbserial-*` 之類，不是 COM6。
 | `scripts/score_mnist.py` | 對答案、算一致率與最大誤差 |
 | `wsl-docker-up.sh` | 在 WSL 裡手動叫起 dockerd（沒 systemd） |
 | `patch_inputmeta.py` | 純文字改 inputmeta（不依賴 yaml 套件） |
-| `README.md` | 研究日誌 —— 為什麼這樣做、排除過哪些路、每個結論的證據 |
+| `docs/research-log.md` | 研究日誌 —— 為什麼這樣做、排除過哪些路、每個結論的證據 |
 | `realtek-email-A-access.md` | 索取離線工具權限的信（已寄出，已拿到） |
 | `realtek-email-B-bugreport.md` | 缺陷回報草稿，**未寄出**。坑 2 的兩處 `--iterations` 寫死值得補進去 |
 | `_backup_amb82/` | ★ 板子原廠檔備份，**不在 git 裡**，還原用 |

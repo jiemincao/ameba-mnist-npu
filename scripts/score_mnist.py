@@ -8,7 +8,7 @@ import os
 import re
 import glob
 
-D = "/workspace/acuity_examples_c901149/Models/mnist_cnn"
+D = os.environ.get("DIR", "/workspace/acuity_examples_c901149/Models/mnist_cnn")
 lines = [l.strip() for l in open(os.path.join(D, "dataset.txt")) if l.strip()]
 labels = [int(re.search(r"/d(\d)_", l).group(1)) for l in lines]
 print("dataset entries =", len(lines))
