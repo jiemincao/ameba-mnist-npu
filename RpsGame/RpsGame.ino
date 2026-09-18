@@ -91,8 +91,15 @@ NNImageClassification imgclass;
 StreamIO videoStreamerNN(1, 1);
 
 // ------------------------------------------------------------------ 類別定義
-// 順序必須跟訓練時的 CLASS_NAMES 一致:["rock", "paper", "scissors"]
-#define NUM_CLASSES 3
+// 順序必須跟訓練時的 CLASS_NAMES 一致:["rock", "paper", "scissors", "none"]
+// none 排在最後,所以 0/1/2 還是原來的猜拳順序,下面那張勝負表不用動。
+#define NUM_CLASSES 4
+#define CLASS_NONE  3      // 「畫面裡沒有手」
+
+// 最高分低於這個值就當作沒認出來。softmax 一定會挑一個最大的出來,
+// 就算畫面裡是一杯咖啡它也會說「這是 rock,信心 34」。門檻是第二道防線,
+// 第一道是上面那個 none 類別 —— 兩個都要有。
+#define CONF_THRESHOLD 60  // 0~100
 
 // 勝負表  RESULT[你出的][板子出的]  0=平手 1=你贏 2=你輸
 const int RESULT[3][3] = {
@@ -103,7 +110,7 @@ const int RESULT[3][3] = {
 
 // ------------------------------------------------- callback 跟 loop 之間的橋
 // callback 在 NN 的 task 裡跑,loop 在另一個 task,所以用 volatile。
-volatile int      g_score[NUM_CLASSES] = {0, 0, 0};    // 0~100
+volatile int      g_score[NUM_CLASSES] = {0, 0, 0, 0};    // 0~100
 volatile int      g_top = -1;
 volatile uint32_t g_frames = 0;
 
@@ -114,7 +121,7 @@ void ICPostProcess(std::vector<ImageClassificationResult> results)
         return;
     }
 
-    int tmp[NUM_CLASSES] = {0, 0, 0};
+    int tmp[NUM_CLASSES] = {0, 0, 0, 0};
     for (int i = 0; i < n; i++) {
         int id = results[i].classID();
         if (id >= 0 && id < NUM_CLASSES) {
@@ -242,8 +249,8 @@ static void sendTensor(void)
 static void sendScore(void)
 {
     char line[64];
-    snprintf(line, sizeof(line), "RPS:SCORE %d %d %d %d",
-             g_score[0], g_score[1], g_score[2], g_top);
+    snprintf(line, sizeof(line), "RPS:SCORE %d %d %d %d %d",
+             g_score[0], g_score[1], g_score[2], g_score[3], g_top);
     Serial.println(line);
 }
 
@@ -262,7 +269,8 @@ static void playRound(void)
     delay(250);    // 讓 callback 有時間跑到「出拳後」的畫面
 
     int you = g_top;
-    int s0 = g_score[0], s1 = g_score[1], s2 = g_score[2];
+    int s0 = g_score[0], s1 = g_score[1];
+    int s2 = g_score[2], s3 = g_score[3];
 
     sendSnapshot();    // 先送圖,GUI 才能把畫面跟判定對起來
 
@@ -270,10 +278,20 @@ static void playRound(void)
         Serial.println("RPS:ERR no result");
         return;
     }
+    // ★ you 可能是 3(none),而 RESULT 只有 3x3。
+    //   不擋的話 RESULT[3][me] 會讀到陣列外面 —— 讀到什麼都有可能。
+    if (you == CLASS_NONE) {
+        Serial.println("RPS:ERR no hand");
+        return;
+    }
+    if (g_score[you] < CONF_THRESHOLD) {
+        Serial.println("RPS:ERR low confidence");
+        return;
+    }
 
     char line[80];
-    snprintf(line, sizeof(line), "RPS:RESULT %d %d %d %d %d %d",
-             you, me, RESULT[you][me], s0, s1, s2);
+    snprintf(line, sizeof(line), "RPS:RESULT %d %d %d %d %d %d %d",
+             you, me, RESULT[you][me], s0, s1, s2, s3);
     Serial.println(line);
 }
 

@@ -184,8 +184,10 @@ class Board:
 
         if head == "SCORE":
             p = rest.split()
-            if len(p) == 4:
-                self.events.put(("score", [int(p[0]), int(p[1]), int(p[2])], int(p[3])))
+            if len(p) == 5:                     # 四類分數 + top
+                self.events.put(("score",
+                                 [int(p[0]), int(p[1]), int(p[2]), int(p[3])],
+                                 int(p[4])))
             return
 
         if head == "CNT":
@@ -194,8 +196,8 @@ class Board:
 
         if head == "RESULT":
             p = [int(x) for x in rest.split()]
-            if len(p) == 6:
-                self.events.put(("result", p[0], p[1], p[2], p[3:6]))
+            if len(p) == 7:                     # you me 勝負 + 四類分數
+                self.events.put(("result", p[0], p[1], p[2], p[3:7]))
             return
 
         if head == "READY":
@@ -315,12 +317,13 @@ def main():
     HINT_FONT[0] = font(13)
 
     # ---- 狀態 ----
-    scores = [0, 0, 0]
+    scores = [0, 0, 0, 0]
     live_top = -1
     frame = None  # pygame.Surface,目前顯示的影像
     last_jpeg = None  # 原始 bytes,存檔用
     countdown = None  # 3/2/1/0 或 None
-    result = None  # (you, board, verdict, [s0,s1,s2])
+    result = None  # (you, board, verdict, [s0,s1,s2,s3])
+    miss = None  # 這一局判不出來的原因,要跟 result 一樣大聲地講出來
     tally = [0, 0, 0]  # 平手 / 你贏 / 你輸
     preview = False
     burst = False
@@ -410,8 +413,10 @@ def main():
                 countdown = ev[1]
                 if countdown == 3:
                     result = None
+                    miss = None
             elif kind == "result":
                 result = (ev[1], ev[2], ev[3], ev[4])
+                miss = None
                 tally[ev[3]] += 1
                 countdown = None
             elif kind == "img":
@@ -460,7 +465,24 @@ def main():
                 ready = True
                 status = "connected"
             elif kind == "err":
+                # 板子這一局沒判出來(沒有手 / 信心不足 / 完全沒結果)。
+                # 一定要把 countdown 清掉 —— 它是 busy 旗標的來源,
+                # 不清的話 START ROUND 會永遠卡在 "PLAYING..."。
                 status = ev[1]
+                countdown = None
+                result = None
+                miss = ev[1]
+
+        # ---------------------------------------------- 看門狗:preview / burst
+        # preview 和 burst 都是「自餵迴圈」:收到圖才會去要下一張。
+        # 中間掉一張(板子漏收指令、或 X 緊接著 S 撞在一起),整條鏈就永遠停住,
+        # 從畫面上看就像按鈕沒反應。超時就自己補送一次 S 把鏈接回去。
+        now = time.time()
+        if (last_img_t and now - last_img_t > 1.5
+                and (preview or (burst and label is not None))):
+            last_img_t = now
+            board.send("S")
+            status = "resync"
 
         # -------------------------------------------------- 事件:鍵盤滑鼠
         KEYMAP = {
@@ -527,20 +549,33 @@ def main():
         rx, rw = 528, WIN_W - 528 - 24
         bar_top = 64
         text(screen, "LIVE", rx, bar_top, f_sm, DIM)
-        for i in range(3):
+        for i in range(4):
             y = bar_top + 28 + i * 40
-            text(screen, NAMES[i], rx, y + 2, f_sm, FG if i == live_top else DIM)
+            text(screen, CAP_NAMES[i], rx, y + 2, f_sm, FG if i == live_top else DIM)
             bx, bw = rx + 110, rw - 160
             pygame.draw.rect(screen, (40, 44, 55), (bx, y, bw, 18), border_radius=4)
             w = int(bw * scores[i] / 100.0)
             if w > 0:
-                pygame.draw.rect(screen, CLS_COL[i], (bx, y, w, 18), border_radius=4)
+                pygame.draw.rect(screen, CAP_COL[i], (bx, y, w, 18), border_radius=4)
             text(screen, "%3d%%" % scores[i], rx + rw, y + 2, f_sm, FG if i == live_top else DIM, right=True)
 
         # ---- 右:這一局的結果 ----
         res_rect = pygame.Rect(rx, 210, rw, 190)
         panel(screen, res_rect)
-        if result is None:
+        if result is None and miss is not None:
+            hint = {"no hand":        "畫面裡沒有手",
+                    "low confidence": "看到了,但沒把握",
+                    "no result":      "這一局沒收到任何辨識結果"}.get(miss, miss)
+            text(screen, "NO CALL", res_rect.centerx, res_rect.y + 16, f_mid,
+                 (232, 168, 84), center=True)
+            text(screen, miss, res_rect.centerx, res_rect.y + 74, f_sm, FG, center=True)
+            text(screen, hint, res_rect.centerx, res_rect.y + 100, f_tiny, DIM, center=True)
+            text(screen, "top %s %d%%  (%d/%d/%d/%d)"
+                 % (CAP_NAMES[live_top] if live_top >= 0 else "-",
+                    scores[live_top] if live_top >= 0 else 0,
+                    scores[0], scores[1], scores[2], scores[3]),
+                 res_rect.centerx, res_rect.y + 148, f_tiny, (90, 98, 114), center=True)
+        elif result is None:
             text(screen, "click START ROUND", res_rect.centerx, res_rect.y + 70, f_sm, DIM, center=True)
             text(screen, "3-2-1, show your hand", res_rect.centerx, res_rect.y + 95, f_tiny, (90, 98, 114), center=True)
         else:
@@ -552,7 +587,7 @@ def main():
             text(screen, "BOARD", res_rect.right - 24, res_rect.y + 70, f_sm, DIM, right=True)
             text(screen, NAMES[bd], res_rect.right - 24, res_rect.y + 92, f_mid, CLS_COL[bd], right=True)
             conf = sn[you]
-            text(screen, "confidence %d%%  (%d/%d/%d)" % (conf, sn[0], sn[1], sn[2]),
+            text(screen, "confidence %d%%  (%d/%d/%d/%d)" % (conf, sn[0], sn[1], sn[2], sn[3]),
                  res_rect.centerx, res_rect.y + 148, f_tiny,
                  DIM if conf >= 80 else LOSE_COL, center=True)
 

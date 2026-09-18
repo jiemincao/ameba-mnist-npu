@@ -30,3 +30,12 @@ _bp_*/
 
 # Python
 __pycache__/
+
+# 打包給 Colab 用的資料集(可由 dataset/ 重新產生)
+dataset.zip
+
+# 人工挑掉的壞照片(留著可還原,不進 repo)
+dataset/_rejected/
+
+# 官方 SDK(閱讀教材,自己 clone,不進 repo)
+ameba-rtos-pro2/

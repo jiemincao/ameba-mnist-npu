@@ -1,0 +1,13 @@
+dataset      : 自己拍的,共 565 張
+  rock       154
+  paper      131
+  scissors   120
+  none       160
+split        : 按拍攝順序 70/15/15
+input        : 96x96x3
+classes      : rock, paper, scissors, none
+params       : 208292
+epochs       : 45
+seed         : 1234
+val accuracy : 0.7407
+test accuracy: 0.9551

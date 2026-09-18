@@ -207,32 +207,107 @@ md(r'''
 那 test 裡就躺著 train 的雙胞胎 —— **模型背起來就有滿分**。
 你又會拿到一個 1.0000 的假成績，然後燒進板子再失望一次。
 
-正確的切法是**按拍攝順序切**：每一類的前 70% 當 train，
-中間 15% 當 val，最後 15% 當 test。
+### 但「按時間排一排、後面 15% 當 test」也不對
 
-檔名裡有時間戳（`rock_20260917_143022_881.jpg`），排序就是拍攝順序。
-只要你收資料時**中途有換位置、換光線**，這樣切出來的 test
-就真的是「沒看過的情況」。
+我們第一次就是這樣切的，結果 test accuracy 只有 0.6491。
+去看它拿哪些照片當考題才發現：**每一類的 test 都只有「最後 4 秒」**——
+同一個姿勢、同一個背景、同一道光。考題只有一個場景，
+分數自然又低又不穩，而且低得沒有道理。
+
+```
+一整段 30 秒的連拍
+├──────────── train 70% ────────────┼─ val ─┼─ test ─┤
+                                              ↑
+                                     只有最後這 4 秒當考題
+```
+
+**一整段連續的連拍，怎麼切都不誠實：**
+
+| 切法 | 問題 |
+|---|---|
+| 隨機切 | 相鄰兩張幾乎一樣 → 雙胞胎作弊，分數**虛高** |
+| 全部排一排、切尾巴 | test 只剩最後幾秒一個畫面 → 分數**虛低且不穩** |
+
+### 正解：先找出「幾段連拍」，每一段各自切
+
+按 BURST 拍一段、停下來換個東西、再拍一段 —— 這些**段**才是資料真正的結構。
+檔名裡的時間戳會告訴我們段落在哪：**間隔超過 1.5 秒就是換了一段**。
+
+然後**每一段各自**切 70/15/15，再把各段的同名部分合起來：
+
+```
+第 1 段 (正面)   ├── train ──┼ val ┼ test ┤
+第 2 段 (轉 45°) ├── train ──┼ val ┼ test ┤
+第 3 段 (換背景) ├── train ──┼ val ┼ test ┤
+                       ↓        ↓      ↓
+                     train     val    test   ← 每一段都有代表
+```
+
+這樣 test 涵蓋**所有場景**，不是只有最後一個。
+
+### 還要再加一道保險：段內的接縫
+
+段內切開的地方，train 的最後一張和 val 的第一張還是相鄰的兩幀 —— 又是雙胞胎。
+所以每個接縫**丟掉 3 張**當緩衝區。丟掉一點資料，換一個可信的分數，很划算。
 
 > 這個原則叫**不要讓資訊從 train 漏到 test**（data leakage）。
-> 只要資料有時間或群組結構，隨機切就是錯的。
+> 只要資料有時間或群組結構，隨機切就是錯的 ——
+> 而且「有結構」不只是時間先後，還包括**分段**。
 ''')
 
 code(r'''
-# ---- 按拍攝順序切 70 / 15 / 15 --------------------------------------
+# ---- 找出連拍段落 ----------------------------------------------------
+# 檔名 rock_20260917_143022_881.jpg -> 20260917_143022 + 881 毫秒
+import datetime
+
+GAP_SEC = 1.5     # 間隔超過這麼久,視為換了一段
+GUARD   = 3       # 每個接縫丟掉幾張,避免相鄰幀跨到不同 split
+
+def shot_time(path):
+    b = os.path.basename(path).rsplit("_", 3)
+    return (datetime.datetime.strptime("_".join(b[-3:-1]), "%Y%m%d_%H%M%S")
+            + datetime.timedelta(milliseconds=int(b[-1][:-4])))
+
+def find_bursts(files):
+    t = [shot_time(f) for f in files]
+    out, start = [], 0
+    for i in range(1, len(files)):
+        if (t[i] - t[i - 1]).total_seconds() > GAP_SEC:
+            out.append(files[start:i]); start = i
+    out.append(files[start:])
+    return [b for b in out if len(b) >= 8]        # 太短的段不夠切,丟掉
+
+print("連拍段落:")
+bursts = {}
+for c in CLASS_NAMES:
+    bursts[c] = find_bursts(paths[c])
+    print("  %-9s %3d 張 -> %d 段  %s"
+          % (c, len(paths[c]), len(bursts[c]), [len(b) for b in bursts[c]]))
+    if len(bursts[c]) < 2:
+        print("     ⚠ 只有 1 段!test 會只涵蓋一個場景,分數不可信。建議分段補拍。")
+''')
+
+code(r'''
+# ---- 每一段各自切 70 / 15 / 15,接縫留緩衝 ----------------------------
 def load_img(p):
     im = Image.open(p).convert("RGB").resize((IMG, IMG), Image.BILINEAR)
     return np.asarray(im, dtype=np.uint8)
 
 xs = {"train": [], "val": [], "test": []}
 ys = {"train": [], "val": [], "test": []}
+dropped = 0
 
 for ci, c in enumerate(CLASS_NAMES):
-    p = paths[c]                       # 已經照檔名(=時間)排序
-    a, b = int(len(p) * 0.70), int(len(p) * 0.85)
-    for split, sub in (("train", p[:a]), ("val", p[a:b]), ("test", p[b:])):
-        for f in sub:
-            xs[split].append(load_img(f)); ys[split].append(ci)
+    for b in bursts[c]:
+        n = len(b)
+        i1, i2 = int(n * 0.70), int(n * 0.85)
+        parts = (("train", b[:max(1, i1 - GUARD)]),
+                 ("val",   b[i1:max(i1 + 1, i2 - GUARD)]),
+                 ("test",  b[i2:]))
+        dropped += n - sum(len(s) for _, s in parts)
+        for split, sub in parts:
+            for f in sub:
+                xs[split].append(load_img(f)); ys[split].append(ci)
 
 for k in xs:
     xs[k] = np.stack(xs[k]); ys[k] = np.array(ys[k], dtype=np.int32)
@@ -244,6 +319,7 @@ x_test,  y_test  = xs["test"],  ys["test"]
 print("train : %5d 張   %s" % (len(x_train), np.bincount(y_train, minlength=NUM_CLASSES)))
 print("val   : %5d 張   %s" % (len(x_val),   np.bincount(y_val,   minlength=NUM_CLASSES)))
 print("test  : %5d 張   %s" % (len(x_test),  np.bincount(y_test,  minlength=NUM_CLASSES)))
+print("接縫緩衝丟掉 : %d 張" % dropped)
 print()
 print("形狀  :", x_train.shape, x_train.dtype)
 ''')
@@ -267,6 +343,14 @@ code(r'''
 AUTOTUNE = tf.data.AUTOTUNE
 BATCH = 32
 
+# 幾何變形用 keras 的層來做,tf.image 沒有旋轉。
+# 注意:這兩層只掛在資料管線上,不會被 model.save() 存進去,
+# 所以匯出的 .tflite 裡面沒有它們 —— 板子上不會多跑這段。
+geom = tf.keras.Sequential([
+    tf.keras.layers.RandomRotation(0.08, fill_mode="nearest"),   # +-約 29 度
+    tf.keras.layers.RandomZoom(0.20, 0.20, fill_mode="nearest"), # 手的遠近
+])
+
 def augment(x, y):
     x = tf.image.random_flip_left_right(x)
     x = tf.image.random_brightness(x, 25.0)          # 光線變化
@@ -275,6 +359,8 @@ def augment(x, y):
     # 小幅平移:手不會永遠在正中央
     x = tf.image.resize_with_crop_or_pad(x, IMG + 12, IMG + 12)
     x = tf.image.random_crop(x, [tf.shape(x)[0], IMG, IMG, 3])
+    # 旋轉 + 縮放:同一個手勢歪一點、遠一點,還是同一個手勢
+    x = geom(x, training=True)
     return tf.clip_by_value(x, 0.0, 255.0), y
 
 def norm(x, y):
@@ -366,7 +452,7 @@ md(r'''
 
 code(r'''
 # ---- 訓練 ----------------------------------------------------------
-EPOCHS = 30
+EPOCHS = 45
 
 cnt = np.bincount(y_train, minlength=NUM_CLASSES).astype(np.float64)
 class_weight = {i: float(cnt.sum() / (NUM_CLASSES * cnt[i])) for i in range(NUM_CLASSES)}
